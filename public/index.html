@@ -704,6 +704,21 @@
     let voiceRecognitionEngine = null;
     let baseSpeechText = "";
 
+    function updateMicUI(isListening, statusText = "Click to Speak") {
+      APP_STATE.isListening = isListening;
+      if (isListening) {
+        elements.micPulseWave.classList.remove('hidden');
+        elements.micPulseWave.classList.add('flex');
+        elements.micTriggerBtn.className = "text-white bg-red-600 p-2.5 rounded-xl transition text-sm cursor-pointer mic-listening";
+        elements.listeningStatus.innerText = statusText;
+      } else {
+        elements.micPulseWave.classList.remove('flex');
+        elements.micPulseWave.classList.add('hidden');
+        elements.micTriggerBtn.className = "text-slate-300 hover:text-teal-400 hover:bg-slate-800 p-2.5 rounded-xl transition text-sm cursor-pointer";
+        elements.listeningStatus.innerText = "Listening... Speak now";
+      }
+    }
+
     function toggleVoiceInput() {
       if (APP_STATE.isListening) {
         stopVoiceListening();
@@ -712,7 +727,7 @@
 
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        triggerToastNotification("Your browser does not support Speech Recognition. Please try Google Chrome.", true);
+        alert("Speech recognition is not supported in this browser. Please use Google Chrome.");
         return;
       }
 
@@ -720,7 +735,7 @@
         baseSpeechText = elements.sourceInput.value;
         voiceRecognitionEngine = new SpeechRecognition();
         voiceRecognitionEngine.continuous = false;
-        voiceRecognitionEngine.interimResults = true;
+        voiceRecognitionEngine.interimResults = false; // Set to false to avoid streaming bugs on mobile Chrome
         voiceRecognitionEngine.maxAlternatives = 1;
 
         const sLang = document.getElementById('source-language').value;
@@ -732,60 +747,51 @@
           es: 'es-ES',
           fr: 'fr-FR',
           de: 'de-DE',
-          ps: 'ps-AF'
+          ps: 'ps-AF',
+          zh: 'zh-CN'
         };
         voiceRecognitionEngine.lang = mapping[sLang] || 'en-US';
 
         voiceRecognitionEngine.onstart = () => {
-          APP_STATE.isListening = true;
-          elements.micPulseWave.classList.remove('hidden');
-          elements.micPulseWave.classList.add('flex');
-          elements.micTriggerBtn.className = "text-white bg-red-600 p-2.5 rounded-xl transition text-sm cursor-pointer mic-listening";
+          updateMicUI(true, "Listening... Speak now!");
         };
 
         voiceRecognitionEngine.onresult = (event) => {
-          let interimText = '';
-          let finalText = '';
-
-          for (let i = 0; i < event.results.length; i++) {
-            if (event.results[i].isFinal) {
-              finalText += event.results[i][0].transcript + ' ';
-            } else {
-              interimText += event.results[i][0].transcript;
+          if (event.results && event.results[0]) {
+            const transcript = event.results[0][0].transcript;
+            if (transcript) {
+              const base = baseSpeechText ? baseSpeechText.trim() : "";
+              elements.sourceInput.value = base ? `${base} ${transcript}` : transcript;
+              onInputTextChange();
+              
+              // Trigger translation automatically after speaking
+              if (typeof executeTranslation === 'function') {
+                executeTranslation();
+              }
             }
           }
-
-          const currentCombined = (finalText + interimText).trim();
-          const base = baseSpeechText ? baseSpeechText.trim() : "";
-          if (currentCombined) {
-            elements.sourceInput.value = base ? `${base} ${currentCombined}` : currentCombined;
-          }
-          if (finalText.trim()) {
-            baseSpeechText = (base ? `${base} ${finalText.trim()}` : finalText.trim()).trim();
-            elements.sourceInput.value = baseSpeechText;
-          }
-          onInputTextChange();
         };
 
-        voiceRecognitionEngine.onerror = (e) => {
-          if (e.error === 'not-allowed') {
+        voiceRecognitionEngine.onerror = (event) => {
+          console.error("Speech Error:", event.error);
+          updateMicUI(false, "Microphone error: " + event.error);
+          if (event.error === 'not-allowed') {
             triggerToastNotification("Microphone permission denied. Enable microphone access in browser settings.", true);
           }
-          stopVoiceListening();
         };
 
         voiceRecognitionEngine.onend = () => {
-          stopVoiceListening();
+          updateMicUI(false, "Click to Speak");
         };
 
         voiceRecognitionEngine.start();
       } catch (err) {
-        stopVoiceListening();
+        console.error("Speech engine failure:", err);
+        updateMicUI(false, "Click to Speak");
       }
     }
 
     function stopVoiceListening() {
-      APP_STATE.isListening = false;
       if (voiceRecognitionEngine) {
         try {
           voiceRecognitionEngine.onstart = null;
@@ -796,9 +802,7 @@
         } catch (e) {}
         voiceRecognitionEngine = null;
       }
-      elements.micPulseWave.classList.remove('flex');
-      elements.micPulseWave.classList.add('hidden');
-      elements.micTriggerBtn.className = "text-slate-300 hover:text-teal-400 hover:bg-slate-800 p-2.5 rounded-xl transition text-sm cursor-pointer";
+      updateMicUI(false, "Click to Speak");
       baseSpeechText = elements.sourceInput.value;
     }
 
